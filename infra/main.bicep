@@ -35,7 +35,7 @@ param storageAccountName string = ''
 // Azure OpenAI parameters
  
 param oaiApiVersion string = '2023-05-15'
-param oaiChatDeployment string = 'gpt-4o'
+param oaiChatDeployment string = 'gpt-35-turbo'
 param oaiEmbeddingDeployment string = 'text-embedding-ada-002'
 param oaiEmbeddingModel string = 'text-embedding-ada-002'
  
