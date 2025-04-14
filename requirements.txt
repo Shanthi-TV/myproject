@@ -4,5 +4,5 @@ pandas
 jsonlines
 promptflow.evals
 openpyxl
-openai==1.33.0 # https://github.com/microsoft/promptflow/issues/3751
+openai==1.55.3 # https://github.com/microsoft/promptflow/issues/3751
 azure.mgmt.authorization==4.0.0
