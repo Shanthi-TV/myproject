@@ -44,7 +44,6 @@ async def callback(
         "session_state": session_state
     }
 
-
 async def main():
 
     # Read configuration
@@ -69,22 +68,25 @@ async def main():
 
     if azure_location not in valid_locations:
         print(f"Invalid AZURE_LOCATION: {azure_location}. Must be one of {valid_locations}.")
-    else:
-        # Import the built-in safety evaluators
-        azure_ai_project = {
-            "subscription_id": azure_subscription_id,
-            "resource_group_name": azure_resource_group,
-            "project_name": azure_project_name,
-        }
-        sexual_evaluator = SexualEvaluator(azure_ai_project)
-        self_harm_evaluator = SelfHarmEvaluator(azure_ai_project)
-        hate_unfairness_evaluator = HateUnfairnessEvaluator(azure_ai_project)
-        violence_evaluator = ViolenceEvaluator(azure_ai_project)
+        return
 
-        scenario = AdversarialScenario.ADVERSARIAL_QA
-        azure_ai_project["credential"] = DefaultAzureCredential()
-        simulator = AdversarialSimulator(azure_ai_project=azure_ai_project)
+    # Import the built-in safety evaluators
+    azure_ai_project = {
+        "subscription_id": azure_subscription_id,
+        "resource_group_name": azure_resource_group,
+        "project_name": azure_project_name,
+    }
+    sexual_evaluator = SexualEvaluator(azure_ai_project)
+    self_harm_evaluator = SelfHarmEvaluator(azure_ai_project)
+    hate_unfairness_evaluator = HateUnfairnessEvaluator(azure_ai_project)
+    violence_evaluator = ViolenceEvaluator(azure_ai_project)
 
+    scenario = AdversarialScenario.ADVERSARIAL_QA
+    azure_ai_project["credential"] = DefaultAzureCredential()
+    simulator = AdversarialSimulator(azure_ai_project=azure_ai_project)
+
+    # Try/except block for simulator (without jailbreak)
+    try:
         outputs = await simulator(
             scenario=scenario, 
             target=callback, 
@@ -94,25 +96,30 @@ async def main():
         )
         adversarial_conversation_result = outputs.to_eval_qa_json_lines()
         print(f"Adversarial conversation results: {adversarial_conversation_result}.")
+    except Exception as e:
+        print(f"❌ Failed to run adversarial simulation (non-jailbreak): {e}")
+        return
 
-        prefix = os.getenv("PREFIX", datetime.now().strftime("%y%m%d%H%M%S"))[:14] 
+    prefix = os.getenv("PREFIX", datetime.now().strftime("%y%m%d%H%M%S"))[:14] 
 
-        try:
-            azure_ai_project["credential"] = ""
-            adversarial_eval_result = evaluate(
-                evaluation_name=f"{prefix} Adversarial Tests",  
-                data=adversarial_conversation_result, 
-                evaluators={
-                    "sexual": sexual_evaluator,
-                    "self_harm": self_harm_evaluator,
-                    "hate_unfairness": hate_unfairness_evaluator,
-                    "violence": violence_evaluator
-                },
-                azure_ai_project= azure_ai_project,            
-                output_path="./adversarial_test.json"
+    # Try/except block for adversarial_eval_result
+    try:
+        azure_ai_project["credential"] = ""
+        adversarial_eval_result = evaluate(
+            evaluation_name=f"{prefix} Adversarial Tests",  
+            data=adversarial_conversation_result, 
+            evaluators={
+                "sexual": sexual_evaluator,
+                "self_harm": self_harm_evaluator,
+                "hate_unfairness": hate_unfairness_evaluator,
+                "violence": violence_evaluator
+            },
+            azure_ai_project=azure_ai_project,            
+            output_path="./adversarial_test.json"
         )
-        except Exception as e:
-            print(f"An error occurred during evaluation: {e}\n Retrying without reporting results in Azure AI Project.")
+    except Exception as e:
+        print(f"⚠️ An error occurred during evaluation: {e}\nRetrying without reporting results in Azure AI Project.")
+        try:
             adversarial_eval_result = evaluate(
                 evaluation_name=f"{prefix} Adversarial Tests",  
                 data=adversarial_conversation_result, 
@@ -123,9 +130,13 @@ async def main():
                     "violence": violence_evaluator
                 },
                 output_path="./adversarial_test.json"
-        )        
-        
+            )
+        except Exception as inner_e:
+            print(f"❌ Retried evaluation failed: {inner_e}")
+            return
 
+    # Try/except block for simulator (with jailbreak)
+    try:
         jb_outputs = await simulator(
             scenario=scenario, 
             target=callback,
@@ -134,7 +145,26 @@ async def main():
         )
         adversarial_conversation_result_w_jailbreak = jb_outputs.to_eval_qa_json_lines()
         print(f"Adversarial conversation w/ jailbreak results: {adversarial_conversation_result_w_jailbreak}.")
+    except Exception as e:
+        print(f"❌ Failed to run adversarial simulation (jailbreak): {e}")
+        return
 
+    # Try/except block for adversarial_eval_w_jailbreak_result
+    try:
+        adversarial_eval_w_jailbreak_result = evaluate(
+            evaluation_name=f"{prefix} Adversarial Tests w/ Jailbreak", 
+            data=adversarial_conversation_result_w_jailbreak,
+            evaluators={
+                "sexual": sexual_evaluator,
+                "self_harm": self_harm_evaluator,
+                "hate_unfairness": hate_unfairness_evaluator,
+                "violence": violence_evaluator
+            },
+            azure_ai_project=azure_ai_project,
+            output_path="./adversarial_test_w_jailbreak.json"
+        )
+    except Exception as e:
+        print(f"⚠️ An error occurred during jailbreak evaluation: {e}\nRetrying without reporting results in Azure AI Project.")
         try:
             adversarial_eval_w_jailbreak_result = evaluate(
                 evaluation_name=f"{prefix} Adversarial Tests w/ Jailbreak", 
@@ -145,24 +175,13 @@ async def main():
                     "hate_unfairness": hate_unfairness_evaluator,
                     "violence": violence_evaluator
                 },
-                azure_ai_project=azure_ai_project,
                 output_path="./adversarial_test_w_jailbreak.json"
             )
-        except Exception as e:
-            print(f"An error occurred during evaluation: {e}\n Retrying without reporting results in Azure AI Project.")            
-            adversarial_eval_w_jailbreak_result = evaluate(
-                evaluation_name=f"{prefix} Adversarial Tests w/ Jailbreak", 
-                data=adversarial_conversation_result_w_jailbreak,
-                evaluators={
-                    "sexual": sexual_evaluator,
-                    "self_harm": self_harm_evaluator,
-                    "hate_unfairness": hate_unfairness_evaluator,
-                    "violence": violence_evaluator
-                },
-                output_path="./adversarial_test_w_jailbreak.json"
-            )
+        except Exception as inner_e:
+            print(f"❌ Retried jailbreak evaluation failed: {inner_e}")
+            return
 
-        print(f"Check {prefix} Adversarial Tests results in the 'Evaluation' section of your project: {azure_config.workspace_name}.")
+    print(f"Check {prefix} Adversarial Tests results in the 'Evaluation' section of your project: {azure_config.workspace_name}.")
 
 if __name__ == '__main__':
     import promptflow as pf
